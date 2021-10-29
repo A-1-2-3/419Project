@@ -1,1 +1,1 @@
-"419 Project" 
+419 Project, end-to-end encrypted messenger.
