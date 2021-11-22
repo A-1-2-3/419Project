@@ -22,22 +22,20 @@ sock = socket(AF_INET, SOCK_STREAM)
 
 
 
-# A function that takes in a message as a string, and sends it out.
+# A function that takes in a message as a string, and sends it to the server.
 def send_encrypted_message(message, intentional_bad_auth=False):
     # Encrypt message.
     nonce = nonce_gen()
     message = encrypt_chacha(message.encode('utf-8'), chacha_key, nonce)
-    salt = secrets.randbits(256)
-    auth = auth_chacha(chacha_key, message, salt)
+    auth = auth_chacha(auth_key, message)
 
-    if intentional_bad_auth == True: salt = secrets.randbits(256);
+    if intentional_bad_auth == True: auth = "This is an intentionally bad auth for testing";
 
     message_load = {
         "source": my_username,
         "dest": destination_user,
         "message": message,
         "nonce": nonce,
-        "salt": salt,
         "auth": auth
     }
     sock.sendall(bytes(json.dumps(message_load), encoding='utf-8'))
@@ -63,7 +61,7 @@ def user_receive_messages():
 
         # Verify the message's authentication.
         # If it fails, decrypt and print output to a text file.
-        r_auth = auth_chacha(chacha_key, message_load["message"], message_load["salt"])
+        r_auth = auth_chacha(auth_key, message_load["message"])
         if r_auth != message_load["auth"]:
             print("WARNING: Incoming message failed authentication check. Possible tampering or data loss.")
             # with open("messages_that_failed_authentication.txt", 'a') as file:
@@ -148,7 +146,7 @@ def blessed_user_receive_messages():
 
         # Verify the message's authentication.
         # If it fails, decrypt and print output to a text file.
-        r_auth = auth_chacha(chacha_key, message_load["message"], message_load["salt"])
+        r_auth = auth_chacha(auth_key, message_load["message"])
         if r_auth != message_load["auth"]:
             m = "WARNING: Incoming message failed authentication check. Possible tampering or data loss."           
             # with open("messages_that_failed_authentication.txt", 'a') as file:
@@ -197,10 +195,12 @@ def blessed_user_send_messages():
                                 update_message_list(["- Type '!q' to quit", "- Type '!keys' to print your diffie-hellman and chacha key", "- Type '!bad_auth' before a message to test out sending a message with broken authentication"])
                             elif msg == "!keys":
                                 update_message_list(["================", "DH Hash:     "+dh_key_hash, "ChaCha Hash: "+chacha_key_hash, "================"])
-                            elif msg[:9] == "!bad_auth":
-                                update_message_list([user_prefix + msg[9:]])
-                                msg = msg[9:]
-                                send_encrypted_message(msg, True)
+                            elif msg[:10] == "!bad_auth ":
+                                if msg[10:] == "" or str.isspace(msg[10:]): pass;
+                                else:
+                                    update_message_list([user_prefix + msg[10:]])
+                                    msg = msg[10:]
+                                    send_encrypted_message(msg, True)
                         else: 
                             update_message_list([user_prefix + msg])
                             send_encrypted_message(msg)
@@ -236,7 +236,7 @@ def dh_handshake():
 
     full_dh_key = mix_DH_keys(other_key_load["half_key"], my_exponent)
 
-    return get_chacha_key_from_DH(full_dh_key), hash_dh(full_dh_key)
+    return get_chacha_key_from_DH(full_dh_key), get_hmac_key_from_dh(full_dh_key), hash_dh(full_dh_key)
 
 # The process for performing a DH key exchange with the central server/trusted third party.
 # The shared DH key will create a symmetric key (ChaCha cipher), to be used for sending the user's password to the server.
@@ -261,22 +261,20 @@ def server_dh_handshake():
         exit()
     else: print("Secure communications established with server.")
 
-    return get_chacha_key_from_DH(full_dh_key), dh_hash
+    return get_chacha_key_from_DH(full_dh_key), get_hmac_key_from_dh(full_dh_key), dh_hash
 
 # For logging in; encrypts a password and returns a dictionary ready to be sent to the server.
 def get_encrypted_credentials(action, user, password):
     password = hash_string(password)
     nonce = nonce_gen()
     password = encrypt_chacha(password.encode('utf-8'), server_chacha_key, nonce)
-    salt = secrets.randbits(256)
-    auth = auth_chacha(server_chacha_key, password, salt)
+    auth = auth_chacha(server_auth_key, password)
 
     load = {
         "action": action,
         "user": user,
         "pass": password,
         "nonce": nonce,
-        "auth_salt": salt,
         "auth": auth
     }
     return load
@@ -291,6 +289,9 @@ def register():
             continue
         print("What password do you want?")
         desired_pass = getpass("pass: ")
+        if len(desired_pass) == 0:
+            print("Error: Password must contain at least 1 character")
+            continue
         print("Please enter the password again:")
         desired_pass_check = getpass("pass: ")
         if desired_pass != desired_pass_check:
@@ -321,7 +322,7 @@ def login():
 
 # After a user is logged in, this function takes place until the user is connected with their desired partner.
 def connect_users():
-    destination_user = input("Who do you want to talk with?\n")
+    destination_user = input("\nWho do you want to talk with?\n")
     while True:
         if destination_user.lower() != my_username.lower(): break
         else: destination_user = input("Error: Cannot connect to yourself. Please enter the username of the person you want to talk to:\n")
@@ -373,7 +374,7 @@ while True:
 
 
 # Perform key exchange to derive shared symmetic key between client/server for login/registration
-server_chacha_key, server_dh_key_hash = server_dh_handshake()
+server_chacha_key, server_auth_key, server_dh_key_hash = server_dh_handshake()
 
 
 # Login the user, registering an account first if requested
@@ -395,7 +396,7 @@ destination_user = connect_users()
 # We assume that the two users have no preshared secret, and perform a Diffie-Hellman key exchange
 # Server is trusted third party, assumption of no person-in-the-middle attack
 print("Beginning DH handshake.")
-chacha_key, dh_key_hash = dh_handshake()
+chacha_key, auth_key, dh_key_hash = dh_handshake()
 print("Successfully calculated DH key, as well as the chacha key.")
 chacha_key_hash = hash_chacha(chacha_key)
 

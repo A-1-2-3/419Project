@@ -5,6 +5,7 @@
 ##########################################################################
 import secrets
 import hashlib
+import hmac
 
 ###########################
 # ChaCha20 implementation #
@@ -158,10 +159,28 @@ def get_chacha_key_from_DH(dh_shared_key):
         chacha_key[i] = int(chacha_key[i], 16)
     return chacha_key
 
+# From the shared DH secret, get a key for the ChaCha cipher HMAC authentication
+def get_hmac_key_from_dh(dh_shared_key):
+    # Convert the shared key (int) into a hex string    
+    hex_shared_key = hex(dh_shared_key)[2:]
+    # Get the first 64 chars of the hex string, as a list of eight 2-char strings
+    auth_key = []
+    for i in range(64, (128), 2):
+        auth_key.append(hex_shared_key[i:i+2])
+
+    # Turn those 2-char strings into an integer
+    for i in range(0,len(auth_key)):
+        auth_key[i] = int(auth_key[i], 16)
+    return bytes(auth_key)
+
+
 
 ########################################
 # Hashing and Authentication Functions #
 ########################################
+
+def hash_string(string):
+    return hashlib.sha512(bytes(string, encoding='utf-8')).hexdigest()
 
 def hash_dh(key):
     return hashlib.sha256(bytes(str(key), encoding='utf-8')).hexdigest()
@@ -172,17 +191,22 @@ def hash_chacha(key):
         keystring += bin(i)
     return hashlib.sha256(bytes(keystring, encoding='utf-8')).hexdigest()
 
-def auth_chacha(key, ciphertext, salt):
-    string = str(salt)
-    for i in key:
-        string += bin(i)
-    for i in ciphertext:
-        string += hex(i)
-    return hashlib.sha512(bytes(string, encoding='utf-8')).hexdigest()
 
-def hash_string(string):
-    return hashlib.sha512(bytes(string, encoding='utf-8')).hexdigest()
 
+
+def auth_chacha(key, ciphertext):
+    return hmac.new(key, bytes(ciphertext), hashlib.sha512).hexdigest()
+
+# This was the original function for creating the message integrity check.
+# I decided to switch to HMAC, and it turns out Python includes an implementation of HMAC as described in RFC 2104 in it's standard library.
+# To test out this version, just uncomment it and comment out the other "auth_chacha()" function.
+# def auth_chacha(key, ciphertext):
+#     string = ""
+#     for i in key:
+#         string += bin(i)
+#     for i in ciphertext:
+#         string += hex(i)
+#     return hashlib.sha512(bytes(string, encoding='utf-8')).hexdigest()
 
 
 # Following two functions are not used, since the server is hashing passwords with argon2 rather than with sha512
@@ -191,9 +215,4 @@ def hash_string(string):
 # def hash_password(password, salt):
 #     string = hex(salt) + password + bin(salt)
 #     return hashlib.sha512(bytes(string, encoding='utf-8')).hexdigest()
-
-
-
-
-
 

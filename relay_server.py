@@ -95,10 +95,10 @@ def login(login_load):
 def handle_client(conn, addr):  
     this_user = ""
     # Key exchange with user
-    try: client_chacha_key = create_secure_channel(conn, addr);
+    try: client_chacha_key, client_auth_key = create_secure_channel(conn, addr);
     except Exception as e: close_conn_from_handler(conn, this_user, e); exit();
     # Login the user
-    try: this_user = handle_login_and_registration(conn, addr, client_chacha_key)
+    try: this_user = handle_login_and_registration(conn, addr, client_chacha_key, client_auth_key)
     except Exception as e: close_conn_from_handler(conn, this_user, e); exit();
     # Relaying messages
     try: begin_message_relay(conn, addr)
@@ -108,7 +108,7 @@ def handle_client(conn, addr):
     conn.close()
 
 def close_conn_from_handler(conn, this_user, e):
-    print("Error, closing connection to ",this_user,": ",e,sep='')
+    print("Error, closing connection to ",this_user," [",addr,"]: ",e,sep='')
     if this_user in online_users: del online_users[this_user];
     conn.close()
 
@@ -136,17 +136,18 @@ def create_secure_channel(conn, addr):
         exit()
     else: print("Shared private login key established with", addr)
 
-    return get_chacha_key_from_DH(full_dh_key)
+    return get_chacha_key_from_DH(full_dh_key), get_hmac_key_from_dh(full_dh_key)
 
 
 # Handles the client registration and login.
-def handle_login_and_registration(conn, addr, client_chacha_key):   
+def handle_login_and_registration(conn, addr, client_chacha_key, client_auth_key):   
     print("Received connection from",addr)
     while True:
         login_load = json.loads(conn.recv(64000))
         login_load["user"] = login_load["user"].lower()
 
-        if login_load["auth"] != auth_chacha(client_chacha_key, login_load["pass"], login_load["auth_salt"]):
+        # if login_load["auth"] != auth_chacha(client_chacha_key, login_load["pass"], login_load["auth_salt"]):
+        if login_load["auth"] != auth_chacha(bytes(client_auth_key), login_load["pass"]):
             print("WARNING: Incoming message failed authentication check. Possible tampering or data loss.")
             login_response = {
                 "success": False,
