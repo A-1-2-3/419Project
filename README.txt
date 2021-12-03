@@ -1,3 +1,5 @@
+This is an application for creating an end-to-end encrypted chat. Chats are between two people, and both users must be online to chat with one another. All messages are relayed through a central server.
+
 /==============\
 | Requirements |
 \==============/
